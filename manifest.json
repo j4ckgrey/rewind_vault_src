@@ -1,0 +1,13 @@
+{
+  "id": "rewind.vault",
+  "name": "The Vault",
+  "version": "1.0.0",
+  "description": "Adult content for Rewind — password-gated catalog + search (ThePornDB metadata; Zilean / Torznab / apiJAV / Rapidgator sourcing; on-demand debrid playback). Stays fully isolated from every normal library. Installing reveals the Adult library kind, the Adult sources section, and the ThePornDB credential.",
+  "resources": ["stream", "catalog"],
+  "rewind": {
+    "kind": "adult",
+    "tabs": [],
+    "configKeys": ["theporndb_api_key"],
+    "features": ["adult"]
+  }
+}
