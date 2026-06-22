@@ -8,7 +8,9 @@
     "kind": "adult",
     "bundleUrl": "https://raw.githubusercontent.com/j4ckgrey/rewind_vault/main/dist/index.mjs",
     "tabs": [],
-    "configKeys": ["theporndb_api_key"],
+    "configKeys": [
+      { "key": "theporndb_api_key", "label": "ThePornDB", "category": "Adult Content", "description": "API token from api.theporndb.net → API tokens. Powers adult metadata + search." }
+    ],
     "features": ["adult"]
   }
 }
