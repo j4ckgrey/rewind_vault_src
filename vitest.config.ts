@@ -6,7 +6,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@vault": resolve(__dirname, "./src"),
-      "@forge": resolve(__dirname, "../the_forge/src"),
+      "@forge": resolve(__dirname, "../rewind_forge/src"),
     },
   },
   test: {

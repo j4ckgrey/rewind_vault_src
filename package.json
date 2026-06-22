@@ -16,7 +16,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@rewind/forge": "file:../the_forge"
+    "@rewind/forge": "file:../rewind_forge"
   },
   "devDependencies": {
     "typescript": "^6.0.3",

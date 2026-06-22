@@ -19,7 +19,7 @@ pre-existing adult library — the content is completely inert.
 ## Installing
 
 In the Rewind dashboard go to **Integrations → Addons**, paste the manifest URL
-(e.g. `https://vault.example.com/manifest.json`), and press **Install**.
+(e.g. `https://github.com/j4ckgrey/rewind_vault/blob/main/manifest.json`), and press **Install**.
 
 ## Layout
 

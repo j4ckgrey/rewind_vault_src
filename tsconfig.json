@@ -14,8 +14,8 @@
     "paths": {
       "@vault": ["./src/index.ts"],
       "@vault/*": ["./src/*"],
-      "@forge": ["../the_forge/src/index.ts"],
-      "@forge/*": ["../the_forge/src/*"]
+      "@forge": ["../rewind_forge/src/index.ts"],
+      "@forge/*": ["../rewind_forge/src/*"]
     }
   },
   "include": ["src/**/*.ts"]
