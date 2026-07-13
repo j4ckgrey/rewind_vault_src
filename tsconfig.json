@@ -15,7 +15,9 @@
       "@vault": ["./src/index.ts"],
       "@vault/*": ["./src/*"],
       "@forge": ["../rewind_forge/src/index.ts"],
-      "@forge/*": ["../rewind_forge/src/*"]
+      "@forge/*": ["../rewind_forge/src/*"],
+      "@sdk": ["../rewind_addon_sdk/src/index.ts"],
+      "@sdk/*": ["../rewind_addon_sdk/src/*"]
     }
   },
   "include": ["src/**/*.ts"]

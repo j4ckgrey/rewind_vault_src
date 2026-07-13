@@ -1,3 +1,4 @@
+import{fileURLToPath as __sdk_f}from'node:url';import{dirname as __sdk_d}from'node:path';const __filename=__sdk_f(import.meta.url);const __dirname=__sdk_d(__filename);
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __esm = (fn, res, err) => function __init() {
@@ -7465,6 +7466,20 @@ var init_ptube = __esm({
   }
 });
 
+// ../rewind_addon_sdk/src/manifest.ts
+var SDK_PROTOCOL_VERSION = 1;
+
+// ../rewind_addon_sdk/src/addon.ts
+function defineAddon(def) {
+  return {
+    manifest: def.manifest,
+    async register(host2) {
+      const { resources = {}, api } = await def.setup(host2);
+      return { sdk: SDK_PROTOCOL_VERSION, manifest: def.manifest, resources, api };
+    }
+  };
+}
+
 // src/plugin.ts
 init_host();
 
@@ -9049,13 +9064,268 @@ async function rapidgatorResolve(id) {
   };
 }
 
-// src/plugin.ts
-var manifest = { id: "rewind.vault", kind: "adult" };
-function register(host2) {
-  setVaultHost(host2);
-  return { catalog: catalog_exports, search: search_exports, apijav: apijav_exports, rapidgator: rapidgator_exports, playback: playback_exports };
+// src/hls.ts
+var hls_exports = {};
+__export(hls_exports, {
+  buildAdultHlsProxyUrl: () => buildAdultHlsProxyUrl,
+  getAdultHlsSecret: () => getAdultHlsSecret,
+  handleHlsProxyRequest: () => handleHlsProxyRequest,
+  hlsProxyOptionsResponse: () => hlsProxyOptionsResponse,
+  isBlockedProxyHost: () => isBlockedProxyHost,
+  rewritePlaylist: () => rewritePlaylist,
+  verifyAdultHlsSig: () => verifyAdultHlsSig
+});
+init_db();
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+var SECRET_NS = "adult_hls";
+var SECRET_KEY = "sign_secret";
+var cachedSecret = null;
+async function getAdultHlsSecret() {
+  if (cachedSecret) return cachedSecret;
+  const existing = await kvGet(SECRET_KEY, SECRET_NS);
+  if (existing) {
+    cachedSecret = existing;
+    return existing;
+  }
+  const fresh = randomBytes(32).toString("hex");
+  await kvSet(SECRET_KEY, SECRET_NS, fresh, 0);
+  cachedSecret = fresh;
+  return fresh;
 }
+function sign(target, secret) {
+  return createHmac("sha256", secret).update(target).digest("hex");
+}
+function verifyAdultHlsSig(target, sig, secret) {
+  const expected = sign(target, secret);
+  if (sig.length !== expected.length) return false;
+  try {
+    return timingSafeEqual(Buffer.from(sig), Buffer.from(expected));
+  } catch {
+    return false;
+  }
+}
+function targetFilename(target) {
+  try {
+    const base2 = new URL(target).pathname.split("/").pop() ?? "";
+    const clean = base2.replace(/[^a-zA-Z0-9._-]/g, "");
+    return clean || "s";
+  } catch {
+    return "s";
+  }
+}
+function buildAdultHlsProxyUrl(origin, target, secret) {
+  const u = Buffer.from(target, "utf8").toString("base64url");
+  const sig = sign(target, secret);
+  const name = encodeURIComponent(targetFilename(target));
+  return `${origin.replace(/\/$/, "")}/api/adult-hls/${name}?u=${u}&sig=${sig}`;
+}
+function rewritePlaylist(text, baseUrl, origin, secret) {
+  let parentHost = "";
+  try {
+    parentHost = new URL(baseUrl).host;
+  } catch {
+    return text;
+  }
+  const proxify = (rawUri) => {
+    let abs;
+    try {
+      abs = new URL(rawUri, baseUrl);
+    } catch {
+      return rawUri;
+    }
+    if (abs.host !== parentHost || isBlockedProxyHost(abs.hostname)) return rawUri;
+    return buildAdultHlsProxyUrl(origin, abs.href, secret);
+  };
+  return text.split("\n").map((line) => {
+    const l = line.trim();
+    if (l === "") return line;
+    if (l.startsWith("#")) {
+      return line.replace(/URI="([^"]+)"/g, (_m, uri) => `URI="${proxify(uri)}"`);
+    }
+    return proxify(l);
+  }).join("\n");
+}
+function isBlockedProxyHost(hostname) {
+  const h = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (h === "localhost" || h === "127.0.0.1" || h === "::1") return true;
+  if (!h.includes(".") && !h.includes(":")) return true;
+  if (/^10\./.test(h)) return true;
+  if (/^192\.168\./.test(h)) return true;
+  if (/^169\.254\./.test(h)) return true;
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return true;
+  if (/^127\./.test(h)) return true;
+  if (h.startsWith("fe80:") || h.startsWith("fc") || h.startsWith("fd")) return true;
+  return false;
+}
+var UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
+var CONNECT_TIMEOUT_MS = 2e4;
+function cors(headers) {
+  headers.set("Access-Control-Allow-Origin", "*");
+  headers.set("Access-Control-Allow-Methods", "GET,HEAD,OPTIONS");
+  headers.set("Access-Control-Allow-Headers", "Range,Content-Type");
+  headers.set("Access-Control-Expose-Headers", "Content-Length,Content-Range,Accept-Ranges");
+  return headers;
+}
+function isPlaylistTarget(target, contentType) {
+  const path = (target.split("?")[0] ?? "").toLowerCase();
+  if (path.endsWith(".m3u8") || path.endsWith(".m3u")) return true;
+  const ct = (contentType ?? "").toLowerCase();
+  return ct.includes("mpegurl");
+}
+function hlsProxyOptionsResponse() {
+  return new Response(null, { status: 204, headers: cors(new Headers()) });
+}
+async function handleHlsProxyRequest(request, origin, method) {
+  const url = new URL(request.url);
+  const u = url.searchParams.get("u");
+  const sig = url.searchParams.get("sig");
+  if (!u || !sig) return new Response("bad request", { status: 400, headers: cors(new Headers()) });
+  let target;
+  try {
+    target = Buffer.from(u, "base64url").toString("utf8");
+  } catch {
+    return new Response("bad u", { status: 400, headers: cors(new Headers()) });
+  }
+  const secret = await getAdultHlsSecret();
+  if (!verifyAdultHlsSig(target, sig, secret)) {
+    return new Response("bad signature", { status: 403, headers: cors(new Headers()) });
+  }
+  let targetUrl;
+  try {
+    targetUrl = new URL(target);
+  } catch {
+    return new Response("bad target", { status: 400, headers: cors(new Headers()) });
+  }
+  if (!/^https?:$/.test(targetUrl.protocol) || isBlockedProxyHost(targetUrl.hostname)) {
+    return new Response("blocked host", { status: 403, headers: cors(new Headers()) });
+  }
+  const upstreamHeaders = {
+    "User-Agent": UA,
+    Referer: `${targetUrl.origin}/`,
+    Accept: "*/*"
+  };
+  const range = request.headers.get("range");
+  if (range) upstreamHeaders.Range = range;
+  const ac = new AbortController();
+  request.signal.addEventListener("abort", () => ac.abort(), { once: true });
+  const connectTimer = setTimeout(() => ac.abort(), CONNECT_TIMEOUT_MS);
+  let res;
+  try {
+    res = await fetch(target, {
+      method,
+      headers: upstreamHeaders,
+      redirect: "follow",
+      signal: ac.signal
+    });
+  } catch (e) {
+    clearTimeout(connectTimer);
+    return new Response(`upstream fetch failed: ${e.message}`, {
+      status: 502,
+      headers: cors(new Headers())
+    });
+  }
+  if (isPlaylistTarget(res.url || target, res.headers.get("content-type"))) {
+    clearTimeout(connectTimer);
+    const text = await res.text().catch(() => "");
+    if (!res.ok) {
+      return new Response(text || `upstream ${res.status}`, {
+        status: res.status,
+        headers: cors(new Headers())
+      });
+    }
+    const rewritten = rewritePlaylist(text, res.url || target, origin, secret);
+    const h2 = cors(new Headers());
+    h2.set("Content-Type", "application/vnd.apple.mpegurl");
+    h2.set("Cache-Control", "no-store");
+    return new Response(method === "HEAD" ? null : rewritten, { status: 200, headers: h2 });
+  }
+  const h = cors(new Headers());
+  for (const k of [
+    "content-type",
+    "content-length",
+    "content-range",
+    "accept-ranges",
+    "cache-control",
+    "etag",
+    "last-modified"
+  ]) {
+    const v = res.headers.get(k);
+    if (v) h.set(k, v);
+  }
+  if (!h.has("accept-ranges")) h.set("accept-ranges", "bytes");
+  clearTimeout(connectTimer);
+  return new Response(method === "HEAD" ? null : res.body, { status: res.status, headers: h });
+}
+
+// manifest.json
+var manifest_default = {
+  id: "rewind.vault",
+  name: "The Vault",
+  version: "2.0.0",
+  description: "Adult content for Rewind \u2014 password-gated catalog + search (ThePornDB metadata; Zilean / Torznab / apiJAV / Rapidgator sourcing; on-demand debrid playback). Stays fully isolated from every normal library. Installing reveals the Adult library kind, the Adult sources section, and the ThePornDB credential.",
+  resources: ["catalog", "search", "stream", "resolve", "playback"],
+  types: ["adult"],
+  idPrefixes: ["tpdb:"],
+  rewind: {
+    kind: "adult",
+    sdk: 1,
+    repo: "j4ckgrey/rewind_vault",
+    branch: "main",
+    bundlePath: "dist/index.mjs",
+    bundleUrl: "https://raw.githubusercontent.com/j4ckgrey/rewind_vault/release/dist/index.mjs",
+    tabs: [],
+    configKeys: [
+      { key: "theporndb_api_key", label: "ThePornDB", category: "Adult Content", description: "API token from api.theporndb.net \u2192 API tokens. Powers adult metadata + search." }
+    ],
+    features: ["adult"]
+  }
+};
+
+// src/plugin.ts
+var isInfoHash = (id) => /^[a-f0-9]{40}$/i.test(id);
+async function libraryFromRequest({ extra }) {
+  const libraryId = typeof extra.libraryId === "string" ? extra.libraryId : "";
+  const library = libraryId ? await getVaultHost().getLibrary(libraryId) : void 0;
+  if (!library) throw new Error("extra.libraryId must name an adult library");
+  return library;
+}
+var addon = defineAddon({
+  manifest: manifest_default,
+  setup(host2) {
+    setVaultHost(host2);
+    const api = { catalog: catalog_exports, search: search_exports, apijav: apijav_exports, rapidgator: rapidgator_exports, playback: playback_exports, hls: hls_exports };
+    return {
+      api,
+      resources: {
+        // search/adult/<query>.json?libraryId=… — TPDB-backed adult search.
+        search: async (req) => ({
+          metas: await adultSearch(await libraryFromRequest(req), req.id)
+        }),
+        // catalog/adult/<query>.json — the locally-harvested adult catalog.
+        catalog: async (req) => ({
+          metas: await searchCatalog(
+            req.extra.libraryId ? await libraryFromRequest(req) : {},
+            req.id
+          )
+        }),
+        // stream/adult/<id>.json?libraryId=… — release candidates for an item.
+        stream: async (req) => ({
+          streams: isInfoHash(req.id) ? await adultListCatalogStreams(req.id.toLowerCase()) : await adultListStreams(await libraryFromRequest(req), req.id)
+        }),
+        // resolve/adult/<id>.json?libraryId=…&hash=… — resolve to playback.
+        resolve: async (req) => ({
+          playback: isInfoHash(req.id) ? await adultResolveCatalog(req.id.toLowerCase()) : await adultResolveItem(await libraryFromRequest(req), req.id, void 0, {
+            hash: typeof req.extra.hash === "string" ? req.extra.hash : void 0
+          })
+        })
+      }
+    };
+  }
+});
+var manifest = addon.manifest;
+var register = addon.register;
 export {
+  addon,
   manifest,
   register
 };

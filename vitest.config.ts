@@ -7,6 +7,7 @@ export default defineConfig({
     alias: {
       "@vault": resolve(__dirname, "./src"),
       "@forge": resolve(__dirname, "../rewind_forge/src"),
+      "@sdk": resolve(__dirname, "../rewind_addon_sdk/src"),
     },
   },
   test: {
